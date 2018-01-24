@@ -1,0 +1,8 @@
+*.png
+*.pyc
+
+\.idea/
+
+Photos/
+
+checkpoints/
