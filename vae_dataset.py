@@ -23,14 +23,74 @@ class VAEDataset(Dataset):
     def __getitem__(self, idx):
         img_name = self.file_list[idx]
 
-        # bgr_img = cv2.imread(img_name, -1)
-        # b, g, r = cv2.split(bgr_img)  # get b,g,r
-        # image = cv2.merge([r, g, b])  # switch it to rgb
-        image = cv2.imread(img_name, -1)
+        bgr_img = cv2.imread(img_name, -1)
+        try:
+            b, g, r = cv2.split(bgr_img)  # get b,g,r
+        except:
+            print(img_name)
+        image = cv2.merge([r, g, b])  # switch it to rgb
+
+        # if bgr_img.ndim == 2:
+        #     image = cv2.merge([bgr_img, bgr_img, bgr_img])
+        # elif bgr_img.ndim == 3:
+        #     if bgr_img.shape[2] == 3:
+        #         b, g, r = cv2.split(bgr_img)  # get b,g,r
+        #         image = cv2.merge([r, g, b])  # switch it to rgb
+        #     else:
+        #         image = cv2.merge([bgr_img, bgr_img, bgr_img])
+        # image = cv2.imread(img_name, -1)
 
         sample = self.transform(image)
 
         return sample
+
+class Scale(object):
+    """Rescales the input np.ndarray to the given 'size'.
+    'size' will be the size of the smaller edge.
+    For example, if height > width, then image will be
+    rescaled to (size * height / width, size)
+    size: size of the smaller edge
+    interpolation: Default: cv.INTER_CUBIC
+    """
+    def __init__(self, size, interpolation=cv2.INTER_CUBIC):
+        self.size = size
+        self.interpolation = interpolation
+
+    def __call__(self, img):
+        w, h = img.shape[1], img.shape[0]
+        if (w <= h and w == self.size) or (h <= w and h == self.size):
+            return img
+        if w < h:
+            ow = self.size
+            oh = int(float(self.size) * h / w)
+        else:
+            oh = self.size
+            ow = int(float(self.size) * w / h)
+        return cv2.resize(img, dsize=(ow, oh),
+                          interpolation=self.interpolation)
+
+
+
+class CenterCrop(object):
+    """Crops the given np.ndarray at the center to have a region of
+    the given size. size can be a tuple (target_height, target_width)
+    or an integer, in which case the target will be of a square shape
+    (size, size)
+    """
+    def __init__(self, size):
+        if isinstance(size, numbers.Number):
+            self.size = (int(size), int(size))
+        else:
+            self.size = size
+
+    def __call__(self, img):
+        w, h = img.shape[1], img.shape[0]
+        th, tw = self.size
+        x1 = int(round((w - tw) / 2.))
+        y1 = int(round((h - th) / 2.))
+
+        return img[y1:y1+th, x1:x1+tw, :]
+
 
 class RandomScale(object):
 

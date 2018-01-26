@@ -88,11 +88,11 @@ class CPPNVAE(torch.nn.Module):
             if isinstance(m, torch.nn.Linear):
                 torch.nn.init.xavier_normal(m.weight, gain=torch.nn.init.calculate_gain('relu'))
                 # torch.nn.init.uniform(m.bias.data, a=-1, b=1)
-                m.bias.data.zero_
+                m.bias.data.zero_()
             elif isinstance(m, torch.nn.Conv2d):
                 torch.nn.init.xavier_normal(m.weight, gain=torch.nn.init.calculate_gain('leaky_relu',0.2))
                 # torch.nn.init.uniform(m.bias.data, a=-1, b=1)
-                m.bias.data.zero_
+                m.bias.data.zero_()
             elif isinstance(m, torch.nn.BatchNorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()

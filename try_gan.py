@@ -53,9 +53,9 @@ def create_dataset(args, mode):
     train_transform = torchvision.transforms.Compose([
         vae_data.RandomScale(),
         vae_data.RandomCrop(args.patch_size),
-        # vae_data.RandomHorizontalFlip(),
-        # vae_data.RandomVerticalFlip(),
-        # vae_data.RandomTransposeFlip(),
+        vae_data.RandomHorizontalFlip(),
+        vae_data.RandomVerticalFlip(),
+        vae_data.RandomTransposeFlip(),
         vae_data.Convert(),
     ])
 
