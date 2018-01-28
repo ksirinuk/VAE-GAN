@@ -27,9 +27,9 @@ class _Sampler(torch.nn.Module):
     def forward(self, mu, logvar):
         std = logvar.mul(0.5).exp_()  # calculate the STDEV
         if torch.cuda.is_available():
-            eps = torch.cuda.FloatTensor(std.size()).normal_()  # random normalized noise
+            eps = torch.cuda.FloatTensor(std.size()).normal_(0, 1)  # random normalized noise
         else:
-            eps = torch.FloatTensor(std.size()).normal_()  # random normalized noise
+            eps = torch.FloatTensor(std.size()).normal_(0, 1)  # random normalized noise
         eps = Variable(eps)
         return eps.mul(std).add_(mu)
 
@@ -101,6 +101,7 @@ class _netG(nn.Module):
 
         self.MSECriterion = nn.MSELoss()
         self.BCECriterion = nn.BCELoss()
+        # self.BCELCriterion = nn.BCEWithLogitsLoss()
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr, betas=(beta1, 0.999))
 
@@ -117,11 +118,12 @@ class _netG(nn.Module):
 
     def VAELoss(self, recon, input, mu, logvar):
         MSEerr = self.MSECriterion(recon, input)
+        # MSEerr = self.BCELCriterion(recon, input)
 
         KLD_element = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
         KLD = torch.sum(KLD_element).mul_(-0.5)
-
-        return KLD + MSEerr
+        KLD = KLD/input.nelement()
+        return (KLD + MSEerr)*500.0
 
     def GLoss(self, input):
         return self.BCECriterion(input, torch.ones_like(input))
@@ -166,6 +168,10 @@ class _netD(nn.Module):
         return output.view(-1, 1)
 
     def DLoss(self, real, fake):
+
+        # errD_real = self.BCEcriterion(real, Variable(torch.FloatTensor(real.size()).uniform_(0.7, 1.2).cuda()))
+        # errD_fake = self.BCEcriterion(fake, Variable(torch.FloatTensor(real.size()).uniform_(0.0, 0.3).cuda()))
         errD_real = self.BCEcriterion(real, torch.ones_like(real))
         errD_fake = self.BCEcriterion(fake, torch.zeros_like(fake))
-        return errD_real + errD_fake
+
+        return (errD_real + errD_fake)/2.0, errD_real, errD_fake

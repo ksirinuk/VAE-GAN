@@ -32,12 +32,14 @@ parser.add_argument('--gpu_id', default='0', type=str)
 parser.add_argument('--ngpu', type=int, default=1)
 parser.add_argument('--workers', default=6, type=int)
 parser.add_argument('--checkpoint_folder', default='checkpoints', type=str)
-parser.add_argument('--resume', default='checkpoints/checkpoint_99.pth', type=str)
+parser.add_argument('--resume', default='checkpoints/checkpoint_102.pth', type=str)
 
 parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
 parser.add_argument('--ngf', type=int, default=64)
 parser.add_argument('--ndf', type=int, default=64)
 parser.add_argument('--nc', type=int, default=3)
+
+parser.add_argument('--train_vae', default=False, type=bool)
 
 
 def create_dataset(args, mode):
@@ -132,7 +134,8 @@ def main():
 
     for epoch in range(start_epoch, opt.epochs):
         # train for one epoch
-        stddev = 0.1 * (1 - int(epoch/100)) if epoch <= 100 else 0
+        # stddev = 0.1 * (1 - int(epoch/100)) if epoch <= 100 else 0
+        stddev = 0.0
 
         vae_loss, d_loss, g_loss, D_x, D_G_z1, D_G_z2, \
         t_time, update_D, update_G = train(train_loader, netG, netD, stddev)
@@ -228,39 +231,43 @@ def train(train_loader, netG, netD, stddev):
 
     update_D = 0
     update_G = 0
-    for count, input in enumerate(tqdm(train_loader)):
+    for count, input in enumerate(train_loader):
         sub_time = time.time()
         input = input.cuda(async=True)
         input_var = Variable(input, requires_grad=False)
 
-        ############################
-        # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
-        ###########################
-        # train with real
-        if torch.cuda.is_available():
-            real = netD(input_var + Variable(torch.randn(input_var.size()).cuda() * stddev))
-        else:
-            real = netD(input_var + Variable(torch.randn(input_var.size()) * stddev))
+        if not opt.train_vae:
+            ############################
+            # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
+            ###########################
+            # train with real
+            if torch.cuda.is_available():
+                real = netD(input_var + Variable(torch.randn(input_var.size()).cuda() * stddev))
+            else:
+                real = netD(input_var + Variable(torch.randn(input_var.size()) * stddev))
 
-        # train on fake
-        if torch.cuda.is_available():
-            noise = Variable(torch.cuda.FloatTensor(input_var.size(0), opt.nz, 1, 1).normal_(0, 0.01))
-        else:
-            noise = Variable(torch.FloatTensor(input_var.size(0), opt.nz, 1, 1).normal_(0, 0.01))
-        gen = netG.decoder(noise)
-        fake = netD(gen)
-        d_loss = netD.DLoss(real, fake)
+            # train on fake
+            if torch.cuda.is_available():
+                noise = Variable(torch.cuda.FloatTensor(input_var.size(0), opt.nz, 1, 1).normal_(0, 1))
+            else:
+                noise = Variable(torch.FloatTensor(input_var.size(0), opt.nz, 1, 1).normal_(0, 1))
+            gen = netG.decoder(noise)
+            fake = netD(gen)
+            d_loss, d_loss_real, d_loss_fake = netD.DLoss(real, fake)
 
-        if g_loss.data[0] < 0.7 or d_loss.data[0] > 1.0:
-            netD.optimizer.zero_grad()
-            d_loss.backward()
-            netD.optimizer.step()
-            update_D = 1
+            update_D = 0
+            if g_loss.data[0] < 0.7 or d_loss_real.data[0] > 1.0 or d_loss_fake.data[0] > 1.0:
+            # update_D = 0
+            # if d_loss.data[0] > 0.6 and g_loss.data[0] < 0.75:
+                netD.optimizer.zero_grad()
+                d_loss.backward()
+                netD.optimizer.step()
+                update_D = 1
 
-        # measure accuracy and record loss
-        d_loss_meter.update(d_loss.data[0], input.size(0))
-        D_x.update(real.data.mean(), real.size(0))
-        D_G_z1.update(fake.data.mean(), fake.size(0))
+            # measure accuracy and record loss
+            d_loss_meter.update(d_loss.data[0], input.size(0))
+            D_x.update(real.data.mean(), real.size(0))
+            D_G_z1.update(fake.data.mean(), fake.size(0))
 
         ############################
         # (2) Update G network: VAE
@@ -277,28 +284,31 @@ def train(train_loader, netG, netD, stddev):
         # measure accuracy and record loss
         vae_loss_meter.update(vae_loss.data[0], input.size(0))
 
-        ############################
-        # (3) Update G network: maximize log(D(G(z)))
-        ###########################
-        recon = netG(input_var)
-        fake = netD(recon)
-        g_loss = netG.GLoss(fake)
+        if not opt.train_vae:
+            ############################
+            # (3) Update G network: maximize log(D(G(z)))
+            ###########################
+            recon = netG(input_var)
+            fake = netD(recon)
+            g_loss = netG.GLoss(fake)
 
-        if d_loss.data[0] < 0.7 or g_loss.data[0] > 1.0:
-            netG.optimizer.zero_grad()
-            g_loss.backward()
-            netG.optimizer.step()
-            update_G = 1
+            update_G = 0
+            if d_loss_real.data[0] < 0.7 or d_loss_fake.data[0] < 0.7 or g_loss.data[0] > 1.0:
+                netG.optimizer.zero_grad()
+                g_loss.backward()
+                netG.optimizer.step()
+                update_G = 1
 
-        # measure accuracy and record loss
-        g_loss_meter.update(g_loss.data[0], input.size(0))
-        D_G_z2.update(fake.data.mean(), fake.size(0))
+            # measure accuracy and record loss
+            g_loss_meter.update(g_loss.data[0], input.size(0))
+            D_G_z2.update(fake.data.mean(), fake.size(0))
 
-        if count%20 == 0:
+        if count%50 == 0:
             grid = torchvision.utils.make_grid(input_var.cpu().data)
             x = grid.numpy()
             x = x.transpose(1, 2, 0)
             x = x * 255
+            x = x.clip(0, 255)
             x = x.astype(np.uint8)
             KSimage.imwrite(x, 'input.png')
 
@@ -306,8 +316,30 @@ def train(train_loader, netG, netD, stddev):
             x = grid.numpy()
             x = x.transpose(1, 2, 0)
             x = x * 255
+            x = x.clip(0, 255)
             x = x.astype(np.uint8)
             KSimage.imwrite(x, 'gen.png')
+
+        if not opt.train_vae:
+            print_str = 'count: %d ' \
+                        'batch_vae_loss: %.3f ' \
+                        'batch_d_loss: %.3f ' \
+                        'batch_g_loss: %.3f ' \
+                        'avg_D_x: %.3f ' \
+                        'avg_D_G_z1: %.3f ' \
+                        'avg_D_G_z2: %.3f ' \
+                        'time: %.3f ' \
+                        'update_D: %d ' \
+                        'update_G: %d '
+
+            print(print_str % (count, vae_loss.data[0], d_loss.data[0], g_loss.data[0],
+                               D_x.avg, D_G_z1.avg, D_G_z2.avg, time.time() - sub_time, update_D, update_G))
+        else:
+            print_str = 'count: %d ' \
+                       'batch_vae_loss: %.3f ' \
+                       'time: %.3f '
+
+            print(print_str % (count, vae_loss.data[0], time.time() - sub_time))
 
     # measure elapsed time
     time_meter.update(time.time() - t)
