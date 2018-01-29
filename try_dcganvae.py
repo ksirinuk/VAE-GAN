@@ -31,8 +31,8 @@ parser.add_argument('--beta1', default=0.5, type=float)
 parser.add_argument('--gpu_id', default='0', type=str)
 parser.add_argument('--ngpu', type=int, default=1)
 parser.add_argument('--workers', default=6, type=int)
-parser.add_argument('--checkpoint_folder', default='checkpoints', type=str)
-parser.add_argument('--resume', default='checkpoints/checkpoint_102.pth', type=str)
+parser.add_argument('--checkpoint_folder', default='checkpoints_game', type=str)
+parser.add_argument('--resume', default='checkpoints_game/checkpoint_53.pth', type=str)
 
 parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
 parser.add_argument('--ngf', type=int, default=64)
@@ -255,14 +255,15 @@ def train(train_loader, netG, netD, stddev):
             fake = netD(gen)
             d_loss, d_loss_real, d_loss_fake = netD.DLoss(real, fake)
 
-            update_D = 0
-            if g_loss.data[0] < 0.7 or d_loss_real.data[0] > 1.0 or d_loss_fake.data[0] > 1.0:
+            # update_D = 0
+            # if g_loss.data[0] < 0.7 or d_loss_real.data[0] > 1.0 or d_loss_fake.data[0] > 1.0:
+            if d_loss_real.data[0] > g_loss.data[0] or d_loss_fake.data[0] > g_loss.data[0]:
             # update_D = 0
             # if d_loss.data[0] > 0.6 and g_loss.data[0] < 0.75:
                 netD.optimizer.zero_grad()
                 d_loss.backward()
                 netD.optimizer.step()
-                update_D = 1
+                update_D += 1
 
             # measure accuracy and record loss
             d_loss_meter.update(d_loss.data[0], input.size(0))
@@ -292,12 +293,12 @@ def train(train_loader, netG, netD, stddev):
             fake = netD(recon)
             g_loss = netG.GLoss(fake)
 
-            update_G = 0
+            # update_G = 0
             if d_loss_real.data[0] < 0.7 or d_loss_fake.data[0] < 0.7 or g_loss.data[0] > 1.0:
                 netG.optimizer.zero_grad()
                 g_loss.backward()
                 netG.optimizer.step()
-                update_G = 1
+                update_G += 1
 
             # measure accuracy and record loss
             g_loss_meter.update(g_loss.data[0], input.size(0))
