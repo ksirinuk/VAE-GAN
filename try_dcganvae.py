@@ -31,8 +31,8 @@ parser.add_argument('--beta1', default=0.5, type=float)
 parser.add_argument('--gpu_id', default='0', type=str)
 parser.add_argument('--ngpu', type=int, default=1)
 parser.add_argument('--workers', default=6, type=int)
-parser.add_argument('--checkpoint_folder', default='checkpoints_game', type=str)
-parser.add_argument('--resume', default='checkpoints_game/checkpoint_53.pth', type=str)
+parser.add_argument('--checkpoint_folder', default='checkpoints', type=str)
+parser.add_argument('--resume', default='checkpoints/checkpoint_436.pth', type=str)
 
 parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
 parser.add_argument('--ngf', type=int, default=64)
@@ -99,6 +99,7 @@ def main():
     # optionally resume from a checkpoint
     start_epoch = 0
     train_vae_loss = []
+    train_rep_loss = []
     train_d_loss = []
     train_g_loss = []
     train_D_x = []
@@ -116,6 +117,7 @@ def main():
             netD.load_state_dict(checkpoint['netD_state_dict'])
             start_epoch = checkpoint['epoch']
             train_vae_loss = checkpoint['train_vae_loss']
+            train_rep_loss = checkpoint['train_rep_loss']
             train_d_loss = checkpoint['train_d_loss']
             train_g_loss = checkpoint['train_g_loss']
             train_D_x = checkpoint['train_D_x']
@@ -137,10 +139,11 @@ def main():
         # stddev = 0.1 * (1 - int(epoch/100)) if epoch <= 100 else 0
         stddev = 0.0
 
-        vae_loss, d_loss, g_loss, D_x, D_G_z1, D_G_z2, \
+        vae_loss, rep_loss, d_loss, g_loss, D_x, D_G_z1, D_G_z2, \
         t_time, update_D, update_G = train(train_loader, netG, netD, stddev)
 
         train_vae_loss.append(vae_loss)
+        train_rep_loss.append(rep_loss)
         train_d_loss.append(d_loss)
         train_g_loss.append(g_loss)
         train_D_x.append(D_x)
@@ -152,6 +155,7 @@ def main():
 
         print_str = 'epoch: %d ' \
                     'train_vae_loss: %.3f ' \
+                    'train_rep_loss: %.3f ' \
                     'train_d_loss: %.3f ' \
                     'train_g_loss: %.3f ' \
                     'train_D_x: %.3f ' \
@@ -161,7 +165,7 @@ def main():
                     'train_update_D: %d ' \
                     'train_update_G: %d '
 
-        print(print_str % (epoch, vae_loss, d_loss, g_loss, D_x, D_G_z1, D_G_z2, t_time,
+        print(print_str % (epoch, vae_loss, rep_loss, d_loss, g_loss, D_x, D_G_z1, D_G_z2, t_time,
                            update_D, update_G))
 
         # save checkpoint
@@ -175,6 +179,7 @@ def main():
             'netG_state_dict': netG.state_dict(),
             'netD_state_dict': netD.state_dict(),
             'train_vae_loss': train_vae_loss,
+            'train_rep_loss': train_rep_loss,
             'train_d_loss': train_d_loss,
             'train_g_loss': train_g_loss,
             'train_D_x': train_D_x,
@@ -184,6 +189,7 @@ def main():
             'train_update_D': train_update_D,
             'train_update_G': train_update_G},
             {'train_vae_loss': np.array(train_vae_loss),
+             'train_rep_loss': np.array(train_rep_loss),
              'train_d_loss': np.array(train_d_loss),
              'train_g_loss': np.array(train_g_loss),
              'train_D_x': np.array(train_D_x),
@@ -198,6 +204,7 @@ def main():
 
 def train(train_loader, netG, netD, stddev):
     vae_loss_meter = AverageMeter()
+    rep_loss_meter = AverageMeter()
     g_loss_meter = AverageMeter()
     d_loss_meter = AverageMeter()
     time_meter = AverageMeter()
@@ -206,6 +213,7 @@ def train(train_loader, netG, netD, stddev):
     D_G_z2 = AverageMeter()
 
     vae_loss_meter.reset()
+    rep_loss_meter.reset()
     g_loss_meter.reset()
     d_loss_meter.reset()
     time_meter.reset()
@@ -226,7 +234,7 @@ def train(train_loader, netG, netD, stddev):
     input = input.cuda(async=True)
     input_var = Variable(input, requires_grad=False)
     recon = netG(input_var)
-    fake = netD(recon)
+    fake, _ = netD(recon)
     g_loss = netG.GLoss(fake)
 
     update_D = 0
@@ -242,9 +250,9 @@ def train(train_loader, netG, netD, stddev):
             ###########################
             # train with real
             if torch.cuda.is_available():
-                real = netD(input_var + Variable(torch.randn(input_var.size()).cuda() * stddev))
+                real, _ = netD(input_var + Variable(torch.randn(input_var.size()).cuda() * stddev))
             else:
-                real = netD(input_var + Variable(torch.randn(input_var.size()) * stddev))
+                real, _ = netD(input_var + Variable(torch.randn(input_var.size()) * stddev))
 
             # train on fake
             if torch.cuda.is_available():
@@ -252,14 +260,11 @@ def train(train_loader, netG, netD, stddev):
             else:
                 noise = Variable(torch.FloatTensor(input_var.size(0), opt.nz, 1, 1).normal_(0, 1))
             gen = netG.decoder(noise)
-            fake = netD(gen)
+            fake, _ = netD(gen)
             d_loss, d_loss_real, d_loss_fake = netD.DLoss(real, fake)
 
-            # update_D = 0
-            # if g_loss.data[0] < 0.7 or d_loss_real.data[0] > 1.0 or d_loss_fake.data[0] > 1.0:
-            if d_loss_real.data[0] > g_loss.data[0] or d_loss_fake.data[0] > g_loss.data[0]:
-            # update_D = 0
-            # if d_loss.data[0] > 0.6 and g_loss.data[0] < 0.75:
+            if g_loss.data[0] < 0.7 or d_loss_real.data[0] > 1.0 or d_loss_fake.data[0] > 1.0:
+            # if d_loss_real.data[0] > g_loss.data[0] or d_loss_fake.data[0] > g_loss.data[0]: # bad idea because  g will not frequently update
                 netD.optimizer.zero_grad()
                 d_loss.backward()
                 netD.optimizer.step()
@@ -277,23 +282,30 @@ def train(train_loader, netG, netD, stddev):
         z = netG.sampler(mu, logvar)
         recon = netG.decoder(z)
         vae_loss = netG.VAELoss(recon, input_var, mu, logvar)
+        if not opt.train_vae:
+            _, feat_response_recon = netD(recon)
+            _, feat_response_input = netD(input_var)
+            rep_loss = netG.RepLoss(feat_response_recon, feat_response_input)
+            visual_loss = vae_loss + rep_loss
+        else:
+            visual_loss = vae_loss
 
         netG.optimizer.zero_grad()
-        vae_loss.backward()
+        visual_loss.backward()
         netG.optimizer.step()
 
         # measure accuracy and record loss
         vae_loss_meter.update(vae_loss.data[0], input.size(0))
+        rep_loss_meter.update(rep_loss.data[0], input.size(0))
 
         if not opt.train_vae:
             ############################
             # (3) Update G network: maximize log(D(G(z)))
             ###########################
             recon = netG(input_var)
-            fake = netD(recon)
+            fake, _ = netD(recon)
             g_loss = netG.GLoss(fake)
 
-            # update_G = 0
             if d_loss_real.data[0] < 0.7 or d_loss_fake.data[0] < 0.7 or g_loss.data[0] > 1.0:
                 netG.optimizer.zero_grad()
                 g_loss.backward()
@@ -324,6 +336,7 @@ def train(train_loader, netG, netD, stddev):
         if not opt.train_vae:
             print_str = 'count: %d ' \
                         'batch_vae_loss: %.3f ' \
+                        'batch_rep_loss: %.3f ' \
                         'batch_d_loss: %.3f ' \
                         'batch_g_loss: %.3f ' \
                         'avg_D_x: %.3f ' \
@@ -333,7 +346,7 @@ def train(train_loader, netG, netD, stddev):
                         'update_D: %d ' \
                         'update_G: %d '
 
-            print(print_str % (count, vae_loss.data[0], d_loss.data[0], g_loss.data[0],
+            print(print_str % (count, vae_loss.data[0], rep_loss.data[0], d_loss.data[0], g_loss.data[0],
                                D_x.avg, D_G_z1.avg, D_G_z2.avg, time.time() - sub_time, update_D, update_G))
         else:
             print_str = 'count: %d ' \
@@ -345,7 +358,7 @@ def train(train_loader, netG, netD, stddev):
     # measure elapsed time
     time_meter.update(time.time() - t)
 
-    return vae_loss_meter.avg, d_loss_meter.avg, g_loss_meter.avg, \
+    return vae_loss_meter.avg, rep_loss_meter.avg, d_loss_meter.avg, g_loss_meter.avg, \
            D_x.avg, D_G_z1.avg, D_G_z2.avg, time_meter.sum, update_D, update_G
 
 

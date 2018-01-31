@@ -101,7 +101,6 @@ class _netG(nn.Module):
 
         self.MSECriterion = nn.MSELoss()
         self.BCECriterion = nn.BCELoss()
-        # self.BCELCriterion = nn.BCEWithLogitsLoss()
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=lr, betas=(beta1, 0.999))
 
@@ -114,16 +113,28 @@ class _netG(nn.Module):
             mu, logvar = self.encoder(input)
             output = self.sampler(mu, logvar)
             output = self.decoder(output)
+
         return output
 
     def VAELoss(self, recon, input, mu, logvar):
+        # reconstruction loss
         MSEerr = self.MSECriterion(recon, input)
-        # MSEerr = self.BCELCriterion(recon, input)
 
+        # KLD loss
         KLD_element = mu.pow(2).add_(logvar.exp()).mul_(-1).add_(1).add_(logvar)
         KLD = torch.sum(KLD_element).mul_(-0.5)
         KLD = KLD/input.nelement()
+
         return (KLD + MSEerr)*500.0
+
+    def RepLoss(self, feat_response_recon, feat_response_input):
+        # representation loss
+        representation_loss = 0
+        for feat_recon, feat_input in zip(feat_response_recon, feat_response_input):
+            representation_loss += self.MSECriterion(feat_recon,
+                                                     Variable(feat_input.data, requires_grad=False))
+
+        return (representation_loss / len(feat_response_recon))*2.0
 
     def GLoss(self, input):
         return self.BCECriterion(input, torch.ones_like(input))
@@ -163,14 +174,18 @@ class _netD(nn.Module):
         if isinstance(input.data, torch.cuda.FloatTensor) and self.ngpu > 1:
             output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
         else:
-            output = self.main(input)
+            # output = self.main(input)
+            output = input
+            response_features = []
+            for name, module in self.main._modules.items():
+                output = module(output)
+                if name in ['input-conv', 'pyramid.64-128.conv', 'pyramid.128-256.conv', 'pyramid.256-512.conv']:
+                    response_features += [output]
 
-        return output.view(-1, 1)
+        return output.view(-1, 1), response_features
 
     def DLoss(self, real, fake):
 
-        # errD_real = self.BCEcriterion(real, Variable(torch.FloatTensor(real.size()).uniform_(0.7, 1.2).cuda()))
-        # errD_fake = self.BCEcriterion(fake, Variable(torch.FloatTensor(real.size()).uniform_(0.0, 0.3).cuda()))
         errD_real = self.BCEcriterion(real, torch.ones_like(real))
         errD_fake = self.BCEcriterion(fake, torch.zeros_like(fake))
 
